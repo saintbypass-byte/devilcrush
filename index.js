@@ -83,6 +83,7 @@ const io = new Server(server);
 
 
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
 const sessions = new Map(); 
 const pendingCodes = new Map(); 
