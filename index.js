@@ -31,6 +31,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
+const readline = require('readline');
 const pino = require('pino');
 const chalk = require('chalk');
 
@@ -167,6 +168,8 @@ async function createSession(numero, socketId) {
                 const code = await Primis.requestPairingCode(clean);
                 const formatted = code?.match(/.{1,4}/g)?.join('-') || code;
                 pendingCodes.set(clean, formatted);
+                console.log(`\n[PAIRING] WhatsApp number: ${clean}`);
+                console.log(`[PAIRING] Enter this code in WhatsApp Linked devices: ${formatted}\n`);
                 io.to(`numero:${clean}`).emit('pairing:code', { numero: clean, code: formatted });
                 if (socketId) io.to(socketId).emit('pairing:code', { numero: clean, code: formatted });
                 pairResult = { success: true, code: formatted };
@@ -224,6 +227,7 @@ async function createSession(numero, socketId) {
                 pendingCodes.delete(clean);
                 io.to(`numero:${clean}`).emit('session:connected', { numero: clean, name });
                 io.emit('session:connected', { numero: clean, name });
+                console.log(`[CONNECTED] WhatsApp session is connected for ${clean}${name ? ` (${name})` : ''}`);
                 broadcastSessions();
             }
 
@@ -284,6 +288,24 @@ async function createSession(numero, socketId) {
 
 const WORKER_SECRET = process.env.WORKER_SECRET || "sqx_worker_9f2a7c1e4b8d3f60";
 const MAX_SESSIONS = 100;
+
+async function startTerminalPairing() {
+    const configuredNumber = String(process.env.PAIRING_NUMBER || '').replace(/[^0-9]/g, '');
+    if (!process.stdin.isTTY && !configuredNumber) return;
+
+    let numero = configuredNumber;
+    if (!numero) {
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        numero = (await new Promise(resolve => rl.question('Enter WhatsApp number with country code (digits only): ', resolve))).replace(/[^0-9]/g, '');
+        rl.close();
+    }
+    if (!numero) {
+        console.error('[PAIRING] No phone number supplied.');
+        return;
+    }
+    const result = await createSession(numero, null);
+    if (!result?.success) console.error(`[PAIRING] Login failed: ${result?.error || 'unknown error'}`);
+}
 
 app.get('/api/status', (req, res) => {
     const connectedCount = [...sessions.values()].filter(s => s.status === 'connected').length;
@@ -372,4 +394,7 @@ server.listen(PORT, async () => {
     console.log(chalk.hex('#6c5ce7').bold(`║   http://localhost:${PORT}              ║`));
     console.log(chalk.hex('#6c5ce7').bold(`╚══════════════════════════════════════╝\n`));
     await loadExistingSessions();
+    if (![...sessions.values()].some(s => s.status === 'connected')) {
+        startTerminalPairing().catch(err => console.error('[PAIRING] Terminal login failed:', err));
+    }
 });
